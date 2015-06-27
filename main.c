@@ -11,7 +11,7 @@
  where the list names are the categories
   ___________    ___________     ___________
  |          |   |           |   |           |
- | Default  |-> |  List 1   |-> |   List n  |
+ | Default  |-->|  List 1   |-->|   List n  |
  |__________|   |___________|   |___________|
        |              |               |
  Linked Lists:        |               |
@@ -34,17 +34,32 @@
        V
      NULL
 
+
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
-#define HASH_MAX 100
-#define MAX_IN 100
+#define HASH_MAX    100
+#define MAX_IN      100
+
+#define SUCCESS     1
+#define FAILURE     0
+
+#define DEFAULT_NAME "Default"
+
+#define G_STR_IN(a)             if(disp_input(&str_in, a) == FAILURE){ \
+                                    fprintf(stderr, "Error getting input [line %d]\n", __LINE__); \
+                                    return EXIT_FAILURE; \
+                                }
 
 // -------- Typedefs -----------
 typedef struct record record;
+typedef uint8_t uchar;
+typedef int8_t  schar;
+typedef enum { add = 1, delete, print, find, show_cat, search, end } options;
 
 struct record {
     record *next;
@@ -54,15 +69,16 @@ struct record {
 // --------- Prototypes ---------
 
 record* create_record(const char* text);
-uint8_t add_to_list(record **header, const char* text);
-uint8_t delete_item(record **header, char* item_text);
-uint8_t is_in_list(record **header, char* text);
+uchar add_to_list(record **header, const char* text);
+uchar delete_item(record **header, char* item_text);
+uchar is_in_list(record **header, char* text);
 void destroy_list(record *header);
 void print_list(record* header);
-uint8_t add_item(record** header);
-uint8_t get_input(record** header);
+uchar add_item(record** header);
+uchar get_hash_input(record* map[HASH_MAX]);
 unsigned int RSHash(char* str, unsigned int len);
-uint8_t disp_input(char **str_in, const char *message);
+uchar disp_input(char **str_in, const char *message);
+void show_menu();
 
 //--------- Functions ----------
 
@@ -72,10 +88,16 @@ uint8_t disp_input(char **str_in, const char *message);
 record* create_record(const char* text){
     
     record *new = calloc(1, sizeof(record));
-    new->text   = calloc(strlen(text), sizeof(char));
     
-    if (!new->text || !new) {
+    if (!new) {
         fprintf(stderr, "Error assigning memory for %s item \n", text);
+        return NULL;
+    }
+    
+    new->text = calloc(strlen(text) + 1, sizeof(char));
+    if (!new->text) {
+        fprintf(stderr, "Error assigning memory for %s item \n", text);
+        free(new);
         return NULL;
     }
     
@@ -86,20 +108,20 @@ record* create_record(const char* text){
 
 /*
  Add an item to the list, always in the end position
- If it fails return EXIT_FAILURE
+ If it fails return FAILURE
  */
-uint8_t add_to_list(record **header, const char* text){
+uchar add_to_list(record **header, const char* text){
     
     /*
      If it's the first item in the list the thing in header will be NULL
      this is always going to be the category label
      */
-    if (*header == NULL) {
+    if (!header) {
         *header = create_record(text);
         if (!*header) {
-            return EXIT_FAILURE;
+            return FAILURE;
         }
-        return EXIT_SUCCESS;
+        return SUCCESS;
     }
     
     record *last = *header;
@@ -107,16 +129,16 @@ uint8_t add_to_list(record **header, const char* text){
     /*
      iterate through until the ->next is NULL, then add a new record in it's place
      */
-    while (last->next != NULL) {
-        last = last->next;
+    for (last = *header; last->next != NULL; last = last->next) {
+        //do nothing
     }
     
     last->next = create_record(text);
     if (!last->next) {
-        return EXIT_FAILURE;
+        return FAILURE;
     }
 
-    return EXIT_SUCCESS;
+    return SUCCESS;
     
 }
 
@@ -136,7 +158,8 @@ void destroy_list(record *header){
      Or for debugging
      */
     
-    while(last != NULL){
+    for (last = header; last != NULL; last = temp) {
+        
         printf("Destroying item: %s\n",last->text);
         
         temp = last->next;
@@ -145,7 +168,7 @@ void destroy_list(record *header){
         last->text = NULL;
         
         free(last);
-        last = temp;
+
     }
 }
 
@@ -155,7 +178,7 @@ void destroy_list(record *header){
 void print_list(record* header){
     
     record *last = header;
-    uint8_t i = 0;
+    int i = 0;
     
     /*
      the first element of the list (header) is the name of the category, 
@@ -165,28 +188,29 @@ void print_list(record* header){
     if (!last) {
         printf("No Items\n");
     }
-    while (last != NULL) {
+    
+    for (; last != NULL; last = last->next, i++) {
         if (i == 0) {
             printf("Category %s\n", last->text);
             i++;
         }
         else{
-            printf("Item %d: %s\n", i++, last->text);
+            printf("Item %d: %s\n", i, last->text);
         }
-        last = last->next;
     }
+
     printf("------------\n");
 }
 
 /*
     get stdin and add the text in it to the end of the list
  */
-uint8_t add_item(record** header){
+uchar add_item(record** header){
     
     char* input_buff = calloc(MAX_IN, sizeof(char));
     if (!input_buff) {
         fprintf(stderr, "Error getting input memory\n");
-        return EXIT_FAILURE;
+        return FAILURE;
     }
     
     scanf("%s",input_buff);
@@ -200,123 +224,156 @@ uint8_t add_item(record** header){
 }
 
 /*
- main menu function
- returns EXIT_FAILURE if a fatal error occurred
+    disaplys a message on the screen then gets the input and
+    puts it in str_in, retruning appropraite code
  */
-
-uint8_t disp_input(char **str_in, const char *message){
+uchar disp_input(char **str_in, const char *message){
+    
     printf("%s\n>", message);
     *str_in = calloc(MAX_IN, sizeof(char));
     
     if (!*str_in) {
         fprintf(stderr, "Error getting memory for string\n");
-        return EXIT_FAILURE;
+        return FAILURE;
     }
     
     scanf("%s",*str_in);
     
-    return EXIT_SUCCESS;
+    return SUCCESS;
 }
 
-uint8_t get_hash_input(record* map[HASH_MAX]){
+/* display menu options on the screen
+ 
+ 1 - Add item
+ 2 - Delete Item
+ 3 - Print Category
+ 4 - Find in category
+ 5 - show categories
+ 6 - search all categories
+ 7 - exit
+ 
+ */
+void show_menu(){
     
-    int input = 0;
-    char *str_in = NULL;
-    unsigned int code = 0;
+    printf("1 - Add item\n");
+    printf("2 - Delete item\n");
+    printf("3 - Print Category\n");
+    printf("4 - Find in category\n");
+    printf("5 - Show Categories\n");
+    printf("6 - Search in all\n");
+    printf("7 - Exit\n> ");
+}
+
+/*
+ main menu function
+ returns EXIT_FAILURE if a fatal error occurred
+ */
+uchar get_hash_input(record* map[HASH_MAX]){
     
-    record* curr = NULL;
+    int
+         int_in         = 0,
+         n_options      = 0;
+    char
+         *str_in        = NULL,
+         *in_str        = calloc(MAX_IN, sizeof(char));
     
-    /* display menu options on the screen
-     
-     1 - Add item
-     2 - Delete Item
-     3 - Print Category
-     4 - Find in category
-     5 - show categories
-     6 - search all categories
-     7 - exit
-     
+    unsigned int code   = 0;
+    record* curr        = NULL;
+    options menu_choice = 0;
+    
+    if (!in_str) {
+        fprintf(stderr, "Error getting in_str memory");
+        return FAILURE;
+    }
+    
+    /*
+     iterate though the menu choices to find the maximum, 
+     used for validating user input
      */
-    printf("1 - Add item\n2 - Delete item\n3 - Print Category\n4 - Find in category\n5 - Show Categories\n6 - Search in all\n7 - Exit\n> ");
-    scanf("%d",&input);
+    for (int i = 0; n_options < end; ++i) {
+        n_options = i;
+    }
+    
+    /*
+     in order to ensure valid user input it is read in as a string, 
+     then converted to an int using strtol(), reading it in as an int 
+     gives the option of a never ending loop if the user enters 
+     a character, for example
+     */
+    
+    show_menu();
+    scanf("%s",in_str);
     fflush(stdin);
     
-    switch (input) {
+    int_in = (int)strtol(in_str, NULL, 10);
+    
+    /*
+     test user input, if it is in range of the enum then that's cool, 
+     if not display inavlid and leave the menu_choice at 0, 
+     this will default in the switch case
+     */
+    if (int_in < 1 || int_in > n_options) {
+        fprintf(stderr, "Invalid Input\n");
+    }
+    else{
+        menu_choice = int_in;
+    }
+    
+    switch (menu_choice) {
             
-        //Add item
-        case 1:
-            if(disp_input(&str_in, "Which category?") == EXIT_FAILURE){
-                fprintf(stderr, "Error getting input [line %d]\n",__LINE__);
-                return EXIT_FAILURE;
-            };
+        case add:
+            G_STR_IN("Which category?");
             
             //create category if needs be
-            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in)))] == NULL) {
+            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL) {
                 map[code] = create_record(str_in);
             }
             
-            
             printf("Enter the new item\n> ");
             
-            if ((input = add_item(&map[code])) == EXIT_FAILURE){
+            if ((int_in = add_item(&map[code])) == FAILURE){
                 fprintf(stderr, "Error in get_input() function\n");
             }
             
             break;
             
-        //Delete item
-        case 2:
-            if(disp_input(&str_in, "Which category?") == EXIT_FAILURE){
-                fprintf(stderr, "Error getting input [line %d]\n",__LINE__);
-                return EXIT_FAILURE;
-            };
+        case delete:
+            G_STR_IN("Which category?");
             
             scanf("%s",str_in);
             
-            code = RSHash(str_in,(unsigned int) strlen(str_in));
-            
             //create category if needs be
-            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in)))] == NULL) {
+            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL) {
                 printf("Category doesn't exist\n");
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
                 break;
             }
             
-            if((input = delete_item(&map[code], str_in)) == EXIT_FAILURE){
+            if((int_in = delete_item(&map[code], str_in)) == FAILURE){
                 fprintf(stderr, "No match found for %s\n",str_in);
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
                 
             }
             break;
             
-        //print category
-        case 3:
-            if(disp_input(&str_in, "Which category?") == EXIT_FAILURE){
-                fprintf(stderr, "Error getting input [line %d]\n",__LINE__);
-                return EXIT_FAILURE;
-            };
+        case print:
+            G_STR_IN("Which category?");
             
-            
-            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in)))] == NULL){
+            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL){
                 printf("%s isn't a category\n",str_in);
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
                 break;
             }
-            
             
             print_list(map[code]);
             break;
             
-            //find in category
-        case 4:
-            if(disp_input(&str_in, "Which category?") == EXIT_FAILURE){
-                fprintf(stderr, "Error getting input [line %d]\n",__LINE__);
-                return EXIT_FAILURE;
-            };
+        case find:
+            G_STR_IN("Which category?");
             
-            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in)))] == NULL){
+            if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL){
                 printf("%s isn't a category\n",str_in);
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
                 break;
             }
             
@@ -328,9 +385,9 @@ uint8_t get_hash_input(record* map[HASH_MAX]){
             scanf("%s",str_in);
             
             
-            if ((input = is_in_list(&map[code], str_in)) == EXIT_FAILURE) {
+            if ((int_in = is_in_list(&map[code], str_in)) == FAILURE) {
                 printf("%s is not in the list\n",str_in);
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
             }
             else{
                 printf("%s is in the list\n", str_in);
@@ -338,8 +395,7 @@ uint8_t get_hash_input(record* map[HASH_MAX]){
             
             break;
            
-        //print categories
-        case 5:
+        case show_cat:
             printf("-----------\n");
             for (int i = 0; i < HASH_MAX; ++i) {
                 if (map[i] != NULL) {
@@ -349,31 +405,26 @@ uint8_t get_hash_input(record* map[HASH_MAX]){
             printf("-----------\n");
             break;
         
-        //exit
-        case 7:
+        case end:
             
-            input = EXIT_FAILURE;
+            int_in = FAILURE;
             break;
-          
-        //find in all
-        case 6:
-            if(disp_input(&str_in, "What is it?") == EXIT_FAILURE){
-                fprintf(stderr, "Error getting input [line %d]\n",__LINE__);
-                return EXIT_FAILURE;
-            };
+
+        case search:
+            G_STR_IN("What is it?");
             
             printf("Searching (this may take a while)\n");
             
             /*
-             Set input to EXIT_FAILURE, when a match is found change it back to EXIT_SUCCESS to act as a 
+             Set input to FAILURE, when a match is found change it back to EXIT_SUCCESS to act as a
              'match found' flag for the search.
              
              iterate though the hashmap and explore the only the lists which aren't NULL
              
              */
-            input = EXIT_FAILURE;
+            int_in = FAILURE;
             
-            for (int i = 0; i< HASH_MAX && input == EXIT_FAILURE; ++i) {
+            for (int i = 0; i< HASH_MAX && int_in == FAILURE; ++i) {
                 
                 //list must have content
                 if (map[i]) {
@@ -387,7 +438,7 @@ uint8_t get_hash_input(record* map[HASH_MAX]){
                         //is the text a match?
                         if (strcmp(curr->text, str_in) == 0) {
                             printf("Found %s in %s\n",curr->text, map[i]->text);
-                            input = EXIT_SUCCESS;
+                            int_in = SUCCESS;
                             break;
                         }
                         
@@ -397,23 +448,27 @@ uint8_t get_hash_input(record* map[HASH_MAX]){
                 }
             }
             
-            if(input == EXIT_FAILURE){
+            if(int_in == FAILURE){
                 printf("%s isn't an item\n",str_in);
-                input = EXIT_SUCCESS;
+                int_in = SUCCESS;
             }
             break;
             
+            //incase of erroneuous menu choice by user
         default:
-            printf("Error - incorrect choice\n");
+            int_in = SUCCESS;
             break;
     }
+    
+    free(in_str);
+    in_str = NULL;
     
     if (str_in) {
         free(str_in);
         str_in = NULL;
     }
     
-    return input;
+    return int_in;
 }
 
 /*
@@ -425,10 +480,10 @@ uint8_t is_in_list(record **header, char* text){
     
     for (current = *header; current != NULL; current = current->next){
         if(strcmp(current->text, text) == 0){
-            return EXIT_SUCCESS;
+            return SUCCESS;
         }
     }
-    return EXIT_FAILURE;
+    return FAILURE;
 }
 
 
@@ -466,17 +521,18 @@ uint8_t delete_item(record **header, char* item_text){
             }
             
             free(current);
-            return EXIT_SUCCESS;
+            return SUCCESS;
         }
     }
     
-    return EXIT_FAILURE;
+    return FAILURE;
 }
 
 /* 
  algorithm from wikipedia to generate the hash code in range of HASH_MAX
  */
 unsigned int RSHash(char* str, unsigned int len){
+    
     unsigned int b    = 378551;
     unsigned int a    = 63689;
     unsigned int hash = 0;
@@ -496,20 +552,22 @@ int main(int argc, const char * argv[]) {
     printf("Welcome to the To-Do list manager\n");
     
     //initialise the hash table to null elements
-    record *map[HASH_MAX] = { 0 };
+    record *map[HASH_MAX];
     for (int i = 0; HASH_MAX > i; ++i) {
         map[i] = NULL;
     }
     
     //create default category
-    map[RSHash("Default", (unsigned int)strlen("Default"))] = create_record("Default");
+    map[RSHash(DEFAULT_NAME, (unsigned int)strlen(DEFAULT_NAME) + 1)] = create_record(DEFAULT_NAME);
 
     //infinite loop of main program
-    while (get_hash_input(map) != EXIT_FAILURE) {};
+    while (get_hash_input(map) != FAILURE) {
+    //do nothing
+    };
     
     printf("----- Exiting -----\n");
     
-    for (int i = 0; i <HASH_MAX; ++i) {
+    for (int i = 0; i < HASH_MAX; ++i) {
         if (map[i] != NULL) {
             destroy_list(map[i]);
         }
