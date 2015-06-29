@@ -42,18 +42,35 @@
 #include <string.h>
 #include <stdint.h>
 
-#define HASH_MAX    100
-#define MAX_IN      100
+#define HASH_MAX                100
+#define MAX_IN                  100
 
-#define SUCCESS     1
-#define FAILURE     0
+#define SUCCESS                 1
+#define FAILURE                 0
 
-#define DEFAULT_NAME "Default"
+#define TRUE                    1
+#define FALSE                   0
+
+#define DEFAULT_NAME            "Default"
 
 #define G_STR_IN(a)             if(disp_input(&str_in, a) == FAILURE){ \
-                                    fprintf(stderr, "Error getting input [line %d]\n", __LINE__); \
-                                    return EXIT_FAILURE; \
+                                    fprintf(stderr, "[line %d] Error getting input\n", __LINE__); \
+                                    return FAILURE; \
                                 }
+
+//return value is null
+#define MEM_CHK(a, ...)         if (!a) { \
+                                    fprintf(stderr, "[line %d] Error assigning memory for [%s] item\n", __LINE__, __VA_ARGS__); \
+                                    return NULL; \
+                                }
+
+//returns an integer code
+#define MEM_CHK_I(a, ...)       if (!a) { \
+                                    fprintf(stderr, "[line %d] Error assigning memory for [%s] item\n", __LINE__, __VA_ARGS__); \
+                                    return FAILURE; \
+                                }
+
+#define print_list(a)           print_list_recursive(a, TRUE)
 
 // -------- Typedefs -----------
 typedef struct record record;
@@ -71,35 +88,64 @@ struct record {
 record* create_record(const char* text);
 uchar add_to_list(record **header, const char* text);
 uchar delete_item(record **header, char* item_text);
-uchar is_in_list(record **header, char* text);
-void destroy_list(record *header);
-void print_list(record* header);
+uchar is_in_list(record **header, char* search_term);
+void dest_list_recursive(record *header);
+void print_list_recursive(record* header, uchar frame_needed);
 uchar add_item(record** header);
 uchar get_hash_input(record* map[HASH_MAX]);
 unsigned int RSHash(char* str, unsigned int len);
 uchar disp_input(char **str_in, const char *message);
 void show_menu();
+record* find_last(record **header);
+void free_node(record* node);
 
 //--------- Functions ----------
+
+
+/*
+ Frees up the HEAP memory occupied by the node and it's text
+ */
+void free_node(record* node){
+    if (!node) {
+        return;
+    }
+    
+    free(node->text);
+    node->text = NULL;
+    
+    free(node);
+    node = NULL;
+}
+
+
+/*
+ loops through the linked list to find the next null element, then 
+ returns the address of it.
+ 
+ Must be passed a node which isn't NULL otherwise errors will happen
+ 
+ Must pass back the node before so that it can be linked forward
+ */
+record* find_last(record** header){
+    
+    if ((*header)->next) {
+        return find_last(&(*header)->next);
+    }
+    
+    return *header;
+}
 
 /*
  Create memory space for an item and return a pointer to it
  */
+
 record* create_record(const char* text){
     
     record *new = calloc(1, sizeof(record));
-    
-    if (!new) {
-        fprintf(stderr, "Error assigning memory for %s item \n", text);
-        return NULL;
-    }
+    MEM_CHK(new, text);
     
     new->text = calloc(strlen(text) + 1, sizeof(char));
-    if (!new->text) {
-        fprintf(stderr, "Error assigning memory for %s item \n", text);
-        free(new);
-        return NULL;
-    }
+    MEM_CHK(new, text);
     
     strcpy(new->text, text);
     return new;
@@ -124,14 +170,11 @@ uchar add_to_list(record **header, const char* text){
         return SUCCESS;
     }
     
-    record *last = *header;
-    
     /*
-     iterate through until the ->next is NULL, then add a new record in it's place
+     get the address of the last element in the linked list,
+     then link it forward to the new one
      */
-    for (last = *header; last->next != NULL; last = last->next) {
-        //do nothing
-    }
+    record *last = find_last(header);
     
     last->next = create_record(text);
     if (!last->next) {
@@ -145,61 +188,45 @@ uchar add_to_list(record **header, const char* text){
 /*
  Free the memory in the list
  */
-void destroy_list(record *header){
+void dest_list_recursive(record *node){
     
-    record  *last = header,
-            *temp = NULL;
-
     /*
-      free the memory for both the record and it's text until the NULL is encountered,
-     setting each pointer to NULL after free() to avoid confusion later on.
+     If the next item is null if must be the last item in the list, so 
+     free it, then pop back to the previous item and free it, etc.
      
-     print the item being destroyed to keep the user aware of the items they had to do
-     Or for debugging
+     Since the text and the node itself are on the HEAP bot must be freed, 
+     cant free the text afterwards
      */
-    
-    for (last = header; last != NULL; last = temp) {
-        
-        printf("Destroying item: %s\n",last->text);
-        
-        temp = last->next;
-        
-        free(last->text);
-        last->text = NULL;
-        
-        free(last);
-
+    if (node->next) {
+        dest_list_recursive(node->next);
     }
+    printf("Destroying: %s\n",node->text);
+    
+    free_node(node);
 }
 
 /*
-    Print the items in the list
+ Print the items in the list
  */
-void print_list(record* header){
-    
-    record *last = header;
-    int i = 0;
+void print_list_recursive(record* header, uchar frame_needed){
     
     /*
-     the first element of the list (header) is the name of the category, 
-     all other are items within it, frame the list for clarity
+     if the node passed is null then its the last in the linked list, therefore stop recursion.
+     the function is only over called using the macro print_list, which passes a 1, indicating the 
+     node passed was the first of the link list, and therefore the category.
      */
-    printf("------------\n");
-    if (!last) {
-        printf("No Items\n");
+    if (!header) {
+        printf("End of list\n");
+        return;
+    }
+    else if (frame_needed == TRUE) {
+        printf("------------\n%s\n", header->text);
+    }
+    else{
+        printf("Item: %s\n", header->text);
     }
     
-    for (; last != NULL; last = last->next, i++) {
-        if (i == 0) {
-            printf("Category %s\n", last->text);
-            i++;
-        }
-        else{
-            printf("Item %d: %s\n", i, last->text);
-        }
-    }
-
-    printf("------------\n");
+    print_list_recursive(header->next, FALSE);
 }
 
 /*
@@ -208,10 +235,7 @@ void print_list(record* header){
 uchar add_item(record** header){
     
     char* input_buff = calloc(MAX_IN, sizeof(char));
-    if (!input_buff) {
-        fprintf(stderr, "Error getting input memory\n");
-        return FAILURE;
-    }
+    MEM_CHK_I(input_buff, "Input memory");
     
     scanf("%s",input_buff);
     
@@ -231,13 +255,9 @@ uchar disp_input(char **str_in, const char *message){
     
     printf("%s\n>", message);
     *str_in = calloc(MAX_IN, sizeof(char));
+    MEM_CHK_I(str_in, "Input memory");
     
-    if (!*str_in) {
-        fprintf(stderr, "Error getting memory for string\n");
-        return FAILURE;
-    }
-    
-    scanf("%s",*str_in);
+    scanf("%s", *str_in);
     
     return SUCCESS;
 }
@@ -262,6 +282,7 @@ void show_menu(){
     printf("5 - Show Categories\n");
     printf("6 - Search in all\n");
     printf("7 - Exit\n> ");
+
 }
 
 /*
@@ -276,15 +297,12 @@ uchar get_hash_input(record* map[HASH_MAX]){
     char
          *str_in        = NULL,
          *in_str        = calloc(MAX_IN, sizeof(char));
+                          MEM_CHK_I(in_str, "in_str");
     
     unsigned int code   = 0;
-    record* curr        = NULL;
+
     options menu_choice = 0;
     
-    if (!in_str) {
-        fprintf(stderr, "Error getting in_str memory");
-        return FAILURE;
-    }
     
     /*
      iterate though the menu choices to find the maximum, 
@@ -313,7 +331,7 @@ uchar get_hash_input(record* map[HASH_MAX]){
      this will default in the switch case
      */
     if (int_in < 1 || int_in > n_options) {
-        fprintf(stderr, "Invalid Input\n");
+        fprintf(stderr, "<Invalid Input>\n");
     }
     else{
         menu_choice = int_in;
@@ -326,7 +344,9 @@ uchar get_hash_input(record* map[HASH_MAX]){
             
             //create category if needs be
             if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL) {
-                map[code] = create_record(str_in);
+                if(!(map[code] = create_record(str_in))){
+                    return FAILURE;
+                }
             }
             
             printf("Enter the new item\n> ");
@@ -340,14 +360,18 @@ uchar get_hash_input(record* map[HASH_MAX]){
         case delete:
             G_STR_IN("Which category?");
             
-            scanf("%s",str_in);
-            
-            //create category if needs be
             if (map[(code = RSHash(str_in,(unsigned int) strlen(str_in) + 1))] == NULL) {
                 printf("Category doesn't exist\n");
                 int_in = SUCCESS;
                 break;
             }
+            
+            /*
+             Clear the str_in buffer and use it for a new input
+             */
+            memset(str_in, 0, MAX_IN);
+            printf("Enter the item\n> ");
+            scanf("%s", str_in);
             
             if((int_in = delete_item(&map[code], str_in)) == FAILURE){
                 fprintf(stderr, "No match found for %s\n",str_in);
@@ -425,31 +449,16 @@ uchar get_hash_input(record* map[HASH_MAX]){
             int_in = FAILURE;
             
             for (int i = 0; i< HASH_MAX && int_in == FAILURE; ++i) {
-                
-                //list must have content
                 if (map[i]) {
-                    
-                    //first item is category name
-                    curr = map[i]->next;
-                    
-                    //loop through until a NULL is found showing the end of the list
-                    while (curr!= NULL) {
-                        
-                        //is the text a match?
-                        if (strcmp(curr->text, str_in) == 0) {
-                            printf("Found %s in %s\n",curr->text, map[i]->text);
-                            int_in = SUCCESS;
-                            break;
-                        }
-                        
-                        //point to next item in list
-                        curr = curr->next;
+                    int_in = is_in_list(&map[i], str_in);
+                    if (int_in == SUCCESS) {
+                        printf("[%s] is in category [%s]\n", str_in, map[i]->text);
                     }
                 }
             }
             
             if(int_in == FAILURE){
-                printf("%s isn't an item\n",str_in);
+                printf("%s isn't an item\n", str_in);
                 int_in = SUCCESS;
             }
             break;
@@ -474,18 +483,23 @@ uchar get_hash_input(record* map[HASH_MAX]){
 /*
  returns EXIT_SUCCESS if the text  passed is an item in the list
  */
-
-uint8_t is_in_list(record **header, char* text){
+uchar is_in_list(record **header, char* search_term){
+    
     record *current = NULL;
     
+    /*
+     iterate through the list until the NULL is found, each time
+     comparing the text to the search term, strcmp returns 0 if successful
+     */
     for (current = *header; current != NULL; current = current->next){
-        if(strcmp(current->text, text) == 0){
+        
+        if(strcmp(current->text, search_term) == 0){
             return SUCCESS;
         }
     }
+    
     return FAILURE;
 }
-
 
 /*
  deletes an item from the list
@@ -520,7 +534,8 @@ uint8_t delete_item(record **header, char* item_text){
                 prev->next = current->next;
             }
             
-            free(current);
+            free_node(current);
+            
             return SUCCESS;
         }
     }
@@ -558,8 +573,10 @@ int main(int argc, const char * argv[]) {
     }
     
     //create default category
-    map[RSHash(DEFAULT_NAME, (unsigned int)strlen(DEFAULT_NAME) + 1)] = create_record(DEFAULT_NAME);
-
+    if((map[RSHash(DEFAULT_NAME, (unsigned int)strlen(DEFAULT_NAME) + 1)] = create_record(DEFAULT_NAME)) == NULL){
+        return EXIT_FAILURE;
+    }
+    
     //infinite loop of main program
     while (get_hash_input(map) != FAILURE) {
     //do nothing
@@ -567,11 +584,13 @@ int main(int argc, const char * argv[]) {
     
     printf("----- Exiting -----\n");
     
-    for (int i = 0; i < HASH_MAX; ++i) {
+    for (int i = 0; i < HASH_MAX; i++) {
         if (map[i] != NULL) {
-            destroy_list(map[i]);
+            dest_list_recursive(map[i]);
         }
     }
+    
+    printf("----- Bye! -----\n");
 
-    return 0;
+    return EXIT_SUCCESS;
 }
